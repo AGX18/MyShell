@@ -1,0 +1,93 @@
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include <signal.h>
+#include <fcntl.h>
+#include <sys/wait.h>
+
+#define MAX_INPUT 1024
+#define MAX_TOKENS 64
+#define SEPARATE_CHAR " \t\n"
+
+volatile pid_t child_pid = -1; // Global variable to store the child process ID
+
+void handle_SIGINT(int sig) {
+    if (child_pid <= 0) {
+        return;
+    }
+
+    if (kill(child_pid, 0) < 0) {
+        perror("Error checking child process");
+        return;
+    }
+    
+}
+
+
+int main() {
+    char input[MAX_INPUT];    
+    signal(SIGINT, handle_SIGINT); // Register signal handler for SIGINT
+    int token_count = 0;
+    char *tokens[MAX_TOKENS];
+    
+    while (1) {
+        // Infinite loop to keep the program running
+        
+        printf("mysh> ");
+        if (fgets(input, MAX_INPUT, stdin) == NULL && ferror(stdin)) {
+            perror("fgets error");
+            exit(1); 
+        } else if (feof(stdin)) {
+            exit(0); // EOF (Ctrl+D)
+        }
+        
+        
+        input[strcspn(input, "\n")] = '\0'; // Remove trailing newline character
+        
+        if (strcmp(input, "exit") == 0 || strcmp(input, "quit") == 0) {
+            break;
+        }
+        
+        token_count = 0;
+        char *token = strtok(input, SEPARATE_CHAR);
+        while (token != NULL && token_count < MAX_TOKENS - 1) {
+            tokens[token_count++] = token;
+            token = strtok(NULL, SEPARATE_CHAR);
+        }
+        tokens[token_count] = NULL; // Null-terminate the array
+
+        if (token_count == 0) {
+            continue; // No command entered
+        }
+
+        if (strcmp(tokens[0], "cd") == 0) {
+            // Change directory command
+            if (token_count < 2) {
+                fprintf(stderr, "cd: missing argument\n");
+            } else {
+                if (chdir(tokens[1]) != 0) {
+                    perror("cd");
+                }
+            }
+        } else {
+            // Fork a child process to execute the command
+            child_pid = fork();
+            if (child_pid < 0) {
+                perror("fork");
+                continue;
+            } else if (child_pid == 0) {
+                // Child process
+                execvp(tokens[0], tokens);
+                perror("execvp"); // If execvp fails
+                exit(EXIT_FAILURE);
+            } 
+            int status;
+            // Parent process
+            waitpid(child_pid, &status, 0); // Wait for the child process to finish
+            child_pid = -1; // Reset child_pid after waiting
+        }
+    }
+
+    return 0;
+}
